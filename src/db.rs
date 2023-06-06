@@ -1,21 +1,23 @@
+use std::collections::HashMap;
+
 use cfg_if::cfg_if;
 use leptos::*;
 use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct App {
-  id: i32,
-  name: String,
-  company_url: String,
-  release_date: String,
-  genre_id: i32,
-  artwork_large_url: String,
-  seller_name: String,
-  five_star_ratings: i32,
-  four_star_ratings: i32,
-  three_star_ratings: i32,
-  two_star_ratings: i32,
-  one_star_ratings: i32
+  pub id: i32,
+  pub name: String,
+  pub company_url: String,
+  pub release_date: String,
+  pub genre_id: i32,
+  pub artwork_large_url: String,
+  pub seller_name: String,
+  pub five_star_ratings: i32,
+  pub four_star_ratings: i32,
+  pub three_star_ratings: i32,
+  pub two_star_ratings: i32,
+  pub one_star_ratings: i32
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -26,7 +28,6 @@ pub struct Sdk {
   pub url: String,
   pub description: String
 }
-
 
 cfg_if! {
   if #[cfg(feature = "ssr")] {
@@ -47,34 +48,46 @@ cfg_if! {
     pub fn register_server_functions() {
       _ = GetAllChurned::register();
     }
+
+    pub async fn get_all_apps(conn: &mut SqliteConnection) -> SqlResult<i32> {
+      let (count,): (i32,) = sqlx::query_as("SELECT count(*) from app;").fetch_one(conn).await?;
+      Ok(count)
+    }
     
     /// Finds the number of apps that unninstalled `from_sdk`
     /// and are now using `to_sdk`.
     pub async fn get_churned(conn: &mut SqliteConnection, from_sdk: &str, to_sdk: &str) -> SqlResult<Vec<App>> {
       use sqlx::Row;
-      let apps = sqlx::query(r#"
-    SELECT *
-    FROM (
-        (
-          SELECT App.id FROM (app as App
-            INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
-            INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
-          )
-          WHERE Sdk.name = $1
-          AND AppSdk.installed = 1
-        ) as InstalledToday
-        -- selects all the apps that have sdk = to_sdk installed today
-        -- and from that, select all sdk's that were used by that app
-        -- but are not installed anymore
-        INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = InstalledToday.id
-        INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
-        INNER JOIN app as App ON AppSdk.app_id = App.id
-      ) WHERE AppSdk.installed = 0
-        AND Sdk.name = $2
-     "#)
-        .bind(to_sdk)
-        .bind(from_sdk)
-        .fetch_all(conn)
+      
+      let apps = if from_sdk == to_sdk {
+        sqlx::query("SELECT AppSdk.app_id, App.* FROM (app as App
+                      INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
+                      INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id)
+                    WHERE Sdk.name = $1 AND AppSdk.installed = 1")
+         .bind(from_sdk)
+      } else {
+        sqlx::query(r#"
+         SELECT *
+           FROM (
+          (
+            SELECT App.id FROM (app as App
+              INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
+              INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
+            )
+            WHERE Sdk.name = $1
+            AND AppSdk.installed = 1
+          ) as InstalledToday
+          -- selects all the apps that have sdk = to_sdk installed today
+          -- and from that, select all sdk's that were used by that app
+          -- but are not installed anymore
+          INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = InstalledToday.id
+          INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
+          INNER JOIN app as App ON AppSdk.app_id = App.id
+        ) WHERE AppSdk.installed = 0
+          AND Sdk.name = $2
+       "#).bind(to_sdk).bind(from_sdk)
+      };
+      let apps = apps.fetch_all(conn)
         .await?
         .iter()
         .map(|row| App {
@@ -117,18 +130,22 @@ pub async fn get_all_sdks() -> Result<Vec<Sdk>, ServerFnError> {
   Ok(sdks)
 }
 
-#[server(GetAllChurned, "/api")]
-pub async fn get_all_churned(sdks: Vec<String>) -> Result<Vec<(String, Vec<Vec<App>>)>, ServerFnError> {
+#[server(GetAllChurned, "/api", "Cbor")]
+pub async fn get_all_churned(sdks: Vec<Sdk>) -> Result<HashMap<(Sdk, Sdk), Vec<App>>, ServerFnError> {
   let mut conn = create_connection().await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-  let mut ret = Vec::with_capacity(sdks.len());
+  let mut map = HashMap::with_capacity(sdks.len());
   for from in sdks.iter() {
-    let mut row = Vec::with_capacity(sdks.len());
     for to in sdks.iter() {
-      let churned_apps = get_churned(&mut conn, from, to).await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-      row.push(churned_apps);
+      let churned_apps = get_churned(&mut conn, &from.name, &to.name).await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+      map.insert((from.clone(), to.clone()), churned_apps);
     }
-    ret.push((from.clone(), row));
   }
-  Ok(ret)
+  Ok(map)
 }
 
+#[server(GetTotalAppsCount)]
+pub async fn get_total_apps_count() -> Result<i32, ServerFnError> {
+  let mut conn = create_connection().await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+  let count = get_all_apps(&mut conn).await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+  Ok(count)
+}
