@@ -8,5 +8,5 @@ This package uses nix to manage installation of packages. It uses wasm-pack to b
 ```sh
 nix-shell
 wasm-pack build --target=web --debug --no-default-features --features=hydrate
-cargo run --no-default-features --features=ssr --release
+cargo run --no-default-features --features=ssr
 ```
