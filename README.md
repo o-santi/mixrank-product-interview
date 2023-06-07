@@ -4,8 +4,9 @@ A competitive matrix renderer in the browser, built completely in rust.
 
 ## Usage
 
-This package uses nix to manage installation of packages. It uses [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos) to manage building of both the backend server and the hydrated-wasm frontend. It is installed automatically from the nix configuration, so to run the server, you can run:
+This package uses nix to manage installation of packages. It uses wasm-pack to build the wasm hydrated file. To build it:
 ```sh
 nix-shell
-cargo leptos watch --release
+wasm-pack build --target=web --debug --no-default-features --features=hydrate
+cargo run --no-default-features --features=ssr --release
 ```
