@@ -5,28 +5,17 @@ let
     sha256 = "162dywda2dvfj1248afxc45kcrg83appjd0nmdb541hl7rnncf02";
   }) { overlays = oxalica; });
   stdenv = pkgs.stdenv;
-in pkgs.mkShell rec {
+in pkgs.mkShell {
   buildInputs = [
-    pkgs.rust-bin.stable."1.69.0".minimal
+    (pkgs.rust-bin.nightly."2023-01-01".minimal.override {
+      targets = ["wasm32-unknown-unknown"];
+    })
     pkgs.openssl
     pkgs.sqlite
   ];
   nativeBuildInputs = [pkgs.pkg-config];
-  # name = "interview";
-  # shellHook = ''
-  #   source .bashrc
-  # '';           
-  # buildInputs = (with pkgs; [
-  #   bashInteractive
-  #   (pkgs.python3.buildEnv.override {
-  #     ignoreCollisions = true;
-  #     extraLibs = with pkgs.python3.pkgs; [
-  #       # package list: https://search.nixos.org/packages
-  #       # be parsimonious with 3rd party dependencies; better to show off your own code than someone else's
-  #       ipython
-  #       nose
-  #       sqlalchemy
-  #     ];
-  #   })
-  # ]);
+  shellHook =
+    ''
+    cargo install --locked cargo-leptos
+    '';
 }

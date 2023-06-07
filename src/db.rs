@@ -20,6 +20,24 @@ pub struct App {
   pub one_star_ratings: i32
 }
 
+impl App {
+  pub fn rating(&self) -> f32 {
+    (self.one_star_ratings       +
+     self.two_star_ratings   * 2 +
+     self.three_star_ratings * 3 +
+     self.four_star_ratings  * 4 +
+     self.five_star_ratings  * 5) as f32 / self.rating_count() as f32
+  }
+
+  pub fn rating_count(&self) -> i32 {
+    self.one_star_ratings    +
+     self.two_star_ratings   +
+     self.three_star_ratings +
+     self.four_star_ratings  +
+     self.five_star_ratings
+  }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Sdk {
   pub id: i32,
@@ -27,6 +45,12 @@ pub struct Sdk {
   pub slug: String,
   pub url: String,
   pub description: String
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
+pub enum Column {
+  Sdk(Sdk),
+  All
 }
 
 cfg_if! {
@@ -37,7 +61,6 @@ cfg_if! {
     use std::str::FromStr;
     
     pub type SqlResult<T> = Result<T, sqlx::Error>;
-    
     
     pub async fn create_connection() -> SqlResult<SqliteConnection> {
       SqliteConnectOptions::from_str("sqlite://data.db")
@@ -56,17 +79,25 @@ cfg_if! {
     
     /// Finds the number of apps that unninstalled `from_sdk`
     /// and are now using `to_sdk`.
-    pub async fn get_churned(conn: &mut SqliteConnection, from_sdk: &str, to_sdk: &str) -> SqlResult<Vec<App>> {
+    pub async fn get_churned(conn: &mut SqliteConnection, from_sdk: &Column, to_sdk: &Column) -> SqlResult<Vec<App>> {
       use sqlx::Row;
+
+      let equals_from = match from_sdk {
+        Column::Sdk(sdk) => format!("Sdk.id = {}", sdk.id),
+        Column::All => "1".into(),
+      };
+      let equals_to = match to_sdk {
+        Column::Sdk(sdk) => format!("Sdk.id = {}", sdk.id),
+        Column::All => "1".into(),
+      };
       
-      let apps = if from_sdk == to_sdk {
-        sqlx::query("SELECT AppSdk.app_id, App.* FROM (app as App
-                      INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
-                      INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id)
-                    WHERE Sdk.name = $1 AND AppSdk.installed = 1")
-         .bind(from_sdk)
+      let query = if from_sdk == to_sdk {
+        format!("SELECT DISTINCT AppSdk.app_id, App.* FROM (app as App
+                   INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
+                   INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id)
+                 WHERE {equals_from} AND AppSdk.installed = 1")
       } else {
-        sqlx::query(r#"
+        format!("
          SELECT *
            FROM (
           (
@@ -74,7 +105,7 @@ cfg_if! {
               INNER JOIN app_sdk as AppSdk ON AppSdk.app_id = App.id
               INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
             )
-            WHERE Sdk.name = $1
+            WHERE {equals_to}
             AND AppSdk.installed = 1
           ) as InstalledToday
           -- selects all the apps that have sdk = to_sdk installed today
@@ -84,10 +115,10 @@ cfg_if! {
           INNER JOIN sdk as Sdk ON AppSdk.sdk_id = Sdk.id
           INNER JOIN app as App ON AppSdk.app_id = App.id
         ) WHERE AppSdk.installed = 0
-          AND Sdk.name = $2
-       "#).bind(to_sdk).bind(from_sdk)
+          AND {equals_from}
+       ")
       };
-      let apps = apps.fetch_all(conn)
+      let apps = sqlx::query(&query).fetch_all(conn)
         .await?
         .iter()
         .map(|row| App {
@@ -131,12 +162,12 @@ pub async fn get_all_sdks() -> Result<Vec<Sdk>, ServerFnError> {
 }
 
 #[server(GetAllChurned, "/api", "Cbor")]
-pub async fn get_all_churned(sdks: Vec<Sdk>) -> Result<HashMap<(Sdk, Sdk), Vec<App>>, ServerFnError> {
+pub async fn get_all_churned(sdks: Vec<Column>) -> Result<HashMap<(Column, Column), Vec<App>>, ServerFnError> {
   let mut conn = create_connection().await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-  let mut map = HashMap::with_capacity(sdks.len());
+  let mut map = HashMap::with_capacity(sdks.len() * sdks.len());
   for from in sdks.iter() {
     for to in sdks.iter() {
-      let churned_apps = get_churned(&mut conn, &from.name, &to.name).await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+      let churned_apps = get_churned(&mut conn, from, to).await.map_err(|e| ServerFnError::ServerError(e.to_string()))?;
       map.insert((from.clone(), to.clone()), churned_apps);
     }
   }

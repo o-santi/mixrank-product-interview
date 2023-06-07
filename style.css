@@ -1,0 +1,63 @@
+body {
+    font-family: 'Roboto Slab', serif;
+}
+
+.columns {
+    display:flex;
+    flex-wrap: wrap;
+}
+
+ul {
+    list-style-type: none;
+}
+
+.sdk {
+    padding-left: 3px;
+    border-radius: 5px;
+    text-align: center;
+}
+
+.selected {
+    background-color: lightgreen;
+}
+
+.not-selected {
+    background-color: lightgray;
+}
+
+.sdk-column {
+    max-width: 33%;
+}
+
+.matrix-column {
+    padding: 10px;
+    width: 67%;
+}
+
+.matrix {
+    border: 2px solid gray;
+    padding: 5px;
+    border-radius: 10px;
+    overflow-x: auto;
+}
+
+.matrix th {
+    padding: 5px;
+}
+
+.matrix td {
+    text-align: center;
+    border-radius: 5px;
+    padding: 20px;
+}
+
+.matrix tr {
+    padding: 5px;
+}
+
+.apps ul {
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 10px;
+}
